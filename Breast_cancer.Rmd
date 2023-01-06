@@ -1,0 +1,340 @@
+---
+title: "Breast_cancer"
+output: html_document
+date: "2023-01-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# Build Machine learning model for medical diagnoses
+
+### Loading the necessary libraries
+```{r}
+library(rpart)  #partining of DT
+library(caret) #To partition the data into test and training
+library(dplyr)
+library(rpart.plot)
+library(data.tree)  
+library(caTools) #Manipulation of data
+library(ggplot2)
+library(tidyr)
+library(outliers)
+library(sqldf)
+library(dlookr)
+library(corrplot)
+library(aqp)
+library(soilDB)
+library('pROC') 
+library(ROCR)
+library("randomForest")
+library(RColorBrewer)
+
+```
+
+### Importing all the datasets
+
+
+```{r}
+df_testX <- read.csv("testX.csv", header = FALSE)
+df_testY <- read.csv("testY.csv", header = FALSE)
+df_trainX <- read.csv("trainX.csv", header = FALSE)
+df_trainY <- read.csv("trainY.csv", header = FALSE)
+head(df_testX)
+head(df_testY)
+head(df_trainX)
+head(df_trainY)
+```
+
+## Part a 
+### Renaming all the columns
+
+```{r}
+names(df_testX) <- c('radius_mean','texture_mean','perimeter_mean','area_mean','smoothness_mean','compactness_mean',
+                     'concavity_mean','concave_points_mean','symmetry_mean','fractal_dimension_mean','radius_se',
+                     'texure_se','perimeter_se','area_se','smoothness_se','compactness_se','concavity_se',
+                     'concave_points_se','symmetry_se','fractal_dimension_se','radius_worst','texture_worst',
+                     'perimeter_worst','area_worst','smoothness_worst','compactness_worst','concavity_worst',
+                     'concave_points_worst','symmetry_worst','fractal_dimension_worst')
+
+names(df_trainX) <- c('radius_mean','texture_mean','perimeter_mean','area_mean','smoothness_mean','compactness_mean',
+                     'concavity_mean','concave_points_mean','symmetry_mean','fractal_dimension_mean','radius_se',
+                     'texure_se','perimeter_se','area_se','smoothness_se','compactness_se','concavity_se',
+                     'concave_points_se','symmetry_se','fractal_dimension_se','radius_worst','texture_worst',
+                     'perimeter_worst','area_worst','smoothness_worst','compactness_worst','concavity_worst',
+                     'concave_points_worst','symmetry_worst','fractal_dimension_worst')
+
+
+## Using `cbind()` function to join df_testX and df_textY and df_trainX and df_trainY
+
+df_test <- cbind(df_testX,df_testY)
+df_train <- cbind(df_trainX,df_trainY)
+df_test
+df_train
+
+
+df_test <- df_test %>% rename(diagnosis = V1)
+df_train <- df_train %>% rename(diagnosis = V1)
+
+```
+
+
+### Univariate analysis - Finding the summary statistics of each column
+```{r}
+#structure of dataframe
+str(df_test)
+str(df_train)
+
+#Findings : There are 31 fields with 57 rows in train dataset
+          # There are 31 fields with 455 rows in train dataset
+
+#summary
+summary(df_test)
+summary(df_train)
+```
+
+
+
+### Data cleaning
+```{r}
+# Finding the missing values in the dataset using colSums
+
+colSums(is.na(df_train))
+#Findings : There are no missing records in the train dataset
+
+# Finding outliers and treating them
+
+# Plotting Boxplot to find the outliers
+#boxplot(df_train,las=3.8,main = "Outlier detection of all columns using box plot")
+
+## Selecting z-score over inter-quartile range because data has lot of outliers and if we use inter_quartile range then we would be removing around 236 records due to this dataset population would decrease dramatically.
+
+z_scores <- as.data.frame(sapply(df_train, function(df_train) (abs(df_train-mean(df_train))/sd(df_train))))
+Final_train_data <- df_train[!rowSums(z_scores>3), ]
+dim(Final_train_data)
+# Removed 56 outliers using Z-score method
+
+boxplot(Final_train_data,las=3.8,main = "Box plot after outlier treatment")
+
+```
+
+
+### Bivariate analysis
+
+### Correlation matrix
+
+```{r}
+# Calculate correlation matrix
+
+df_correlationMatrix <- cor(Final_train_data)
+
+# summarize the correlation matrix
+
+print(df_correlationMatrix)
+
+#Plot correlation matrix
+corrplot(df_correlationMatrix, type = "upper",order = "hclust",col=brewer.pal(n=8,name= "RdYlBu"),tl.cex=0.5)
+# From the output we can see that columns perimeter_worst, concave_points_mean, concave_poitns_worst,Texture_mean,area_mean,radius_worst,area_worst are highly correlated with diagnosis column
+
+# find attributes that are highly corrected (ideally >0.75)
+
+df_highlyCorrelated <- findCorrelation(df_correlationMatrix, cutoff=0.8,verbose = TRUE)
+# print indexes of highly correlated attributes
+
+print(df_highlyCorrelated)
+
+# Plot Diagnosis vs Perimeter_worst
+ggplot(Final_train_data, aes(x=perimeter_worst, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+# Plot Diagnosis vs concave_points_mean
+ggplot(Final_train_data, aes(x=concave_points_mean, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+# Plot Diagnosis vs concave_points_worst
+ggplot(Final_train_data, aes(x=concave_points_worst, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+# Plot Diagnosis vs texture_mean
+ggplot(Final_train_data, aes(x=texture_mean, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+# Plot Diagnosis vs area_mean
+ggplot(Final_train_data, aes(x=area_mean, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+# Plot Diagnosis vs radius_worst
+ggplot(Final_train_data, aes(x=radius_worst, fill=diagnosis)) + geom_histogram() + facet_wrap(~diagnosis)
+
+```
+
+
+### Converting diagnosis column into factor
+
+```{r}
+Final_train_data$diagnosis <- as.factor(Final_train_data$diagnosis) # Converting the column to a factor variable
+
+df_test$diagnosis <- as.factor(df_test$diagnosis) #Converting the column to a factor variable
+```
+
+### Part b - Create a Decision tree using information gain splits
+
+```{r}
+DT <- rpart(diagnosis ~ ., data=Final_train_data,parms = list(split="information") ,method="class")
+summary(DT)
+# Plotting decision tree using rpart.plot()
+rpart.plot(DT, main="Decision Tree for medical diagnoses")
+ plotcp(DT)
+
+ # Feature evaluation of decision tree
+ DT_feature <- data.frame(imp = DT$variable.importance)
+DT_feature1 <- DT_feature %>% 
+  tibble::rownames_to_column() %>% 
+  dplyr::rename("variable" = rowname) %>% 
+  dplyr::arrange(imp) %>%
+  dplyr::mutate(variable = forcats::fct_inorder(variable))
+
+ggplot2::ggplot(DT_feature1) +
+  geom_col(aes(x = variable, y = imp),
+           col = "black", show.legend = F) +
+  coord_flip() +
+  scale_fill_grey() +
+  theme_bw()
+# The important features predicted from decision tree are perimeter_worst, radius_worst, area_worst,perimeter_mean,area_mean,perimter_mean,area_mean,radius_mean,cancave_points_worst,concavity_mean
+ 
+ # Insights : There are 5 leaf nodes in this decision tree
+```
+
+
+
+
+###  Major predictors
+
+--Major predictors suggested by the tree are Perimeter_worst, concave_points_mean, Conace_poins_worst,Texure_mean. These are the major predictors because we are getting maximum information gain from each split
+
+--Yes,Predictors from the Decision tree is same as the predictors we got from correlation matrix
+
+### Highest probabilty of cancer
+
+-- If the perimeter_worst is less than 107 and concave_points_mean greater than 0.064, then the person is likely to have cancerous tissue and the probability in this case is 100% -- If the perimeter perimeter_worst is less than 107 and concave_points_mean is less than 0.064 and texture_worst is less than 20 then the person having cancerous tissue has a probability of 81%
+
+###  Accuracy of the decision tree model
+
+```{r}
+# Predicting the model on train data
+predict_train <-predict(DT, Final_train_data, type = 'class')
+table_train <- table(Final_train_data$diagnosis, predict_train)
+table_train
+
+# Predicting the model on test data
+predict_test <-predict(DT, df_test, type = 'class')
+table_test <- table(df_test$diagnosis, predict_test)
+table_test
+
+# Accuracy of the model on train data
+accuracy_Train <- sum(diag(table_train)) / sum(table_train)
+print(paste('Accuracy for train', accuracy_Train))
+# Findings : Accuracy for the train data is 96.2%
+
+# Accuracy of the model on test data
+accuracy_Test <- sum(diag(table_test)) / sum(table_test)
+print(paste('Accuracy for test', accuracy_Test))
+#Accuracy for test data is 89.4%
+
+```
+
+
+### Constructing the best possible decision tree
+
+```{r}
+# Bulding a new decision tree to improve the accuracy
+
+DT1 <- rpart(diagnosis ~ ., data=Final_train_data,parms = list(split="information") ,method="class",
+             control = rpart.control( minsplit = 10, minbucket = 5, cp = 0.01))
+
+# Summary of decision tree
+summary(DT1)
+
+# Predicting the model on train data
+DT1_train <- table(pred=predict(DT1,Final_train_data, type="class"), true=Final_train_data$diagnosis)
+
+
+# Predicting the model on test data
+DT1_test <- table(pred=predict(DT1,df_test, type="class"), true=df_test$diagnosis)
+
+
+# Accuracy of train data
+
+accuracy_Train_DT1 <- sum(diag(DT1_train)) / sum(DT1_train)
+accuracy_Train_DT1
+# Insights : Accuracy of train data is 98.74%
+
+# Accuracy of test data
+
+accuracy_Test_DT1 <- sum(diag(DT1_test)) / sum(DT1_test)
+accuracy_Test_DT1
+# Insights : Accuracy of test data is 94.73%
+
+# Confusion matrix
+confusionMatrix(DT1_train,reference = Final_train_data$diagnosis)
+
+#Insights : 1. Accuracy : 98.75%
+#           2.Sensitivity : 0.984       
+#           3.Specificity : 0.984
+
+
+# ROC curve for new model DT1
+scoreTst <- predict(DT1, df_test, type="prob")[, 2]
+scoreTst
+
+#now apply the prediction function from ROCR to get a prediction object
+rocPredTst <- prediction(scoreTst, df_test$diagnosis, label.ordering = c('0', '1')) 
+
+#obtain performance using the function from ROCR, then plot
+perfROCTst<-ROCR::performance(rocPredTst,"tpr","fpr")
+
+# ROC curve for a initial model DT
+scoreTst_DT <- predict(DT, df_test, type="prob")[,2]
+rocPredTst_DT <- prediction(scoreTst_DT, df_test$diagnosis,label.ordering = c('0', '1'))
+perfROCTst_DT <- ROCR::performance(rocPredTst_DT, "tpr", "fpr")
+plot(perfROCTst)
+plot(perfROCTst_DT, add=TRUE, col="blue")
+
+# AUC value for Final model DT1
+aucPerf_final=ROCR::performance(rocPredTst, "auc")
+aucPerf_final@y.values
+
+#Findings : AUC value for DT1 is 0.944
+
+# AUC value for initial model DT
+aucPerf_initial=ROCR::performance(rocPredTst_DT, "auc")
+aucPerf_initial@y.values
+
+# Findings : AUC value for DT is 0.9268
+
+```
+
+###Plot your final decision tree model and write down all decision rules
+
+```{r}
+
+rpart.plot(DT1, main="Final Decision Tree for medical diagnoses")
+
+```
+
